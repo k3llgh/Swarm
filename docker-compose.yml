@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+
+  # ── Main application ──────────────────────────────────────────────────────────
+  swarm:
+    build: .
+    image: nano-swarm:latest
+    container_name: nano-swarm
+    env_file: .env
+    volumes:
+      - ./data:/app/data          # persist curriculum, patterns, reports
+      - ./seeds:/app/seeds:ro     # read-only seed material
+      - ./sandbox:/app/sandbox:ro # read-only sandbox templates
+    networks:
+      - swarm-net
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false          # only required when LLM_BACKEND=ollama
+    command: ["pipeline", "--seeds", "seeds/exploit_seeds.json"]
+    restart: "no"
+
+  # ── Optional: local LLM via Ollama ───────────────────────────────────────────
+  # Set LLM_BACKEND=ollama in .env to use this instead of DeepSeek/Anthropic API.
+  # Pull your model first: docker compose run ollama pull deepseek-r1:7b
+  ollama:
+    image: ollama/ollama:latest
+    container_name: nano-swarm-ollama
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - swarm-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    profiles:
+      - ollama                   # only starts with: docker compose --profile ollama up
+
+  # ── Ethereum sandbox (Foundry) ────────────────────────────────────────────────
+  # Used by the sandbox validator for PoC execution.
+  # Only needed if you want Ethereum sandbox validation in CI/Docker.
+  foundry:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: nano-swarm-foundry
+    volumes:
+      - ./sandbox/ethereum:/workspace
+    networks:
+      - swarm-net
+    profiles:
+      - sandbox                  # only starts with: docker compose --profile sandbox up
+    entrypoint: ["forge"]
+    command: ["--version"]
+
+volumes:
+  ollama-models:
+
+networks:
+  swarm-net:
+    driver: bridge
